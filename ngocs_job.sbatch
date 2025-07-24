@@ -21,12 +21,12 @@ source /meta/opt/anaconda3/etc/profile.d/conda.sh
 # The following guards against that. Not necessary if you always run this script from a clean terminal
 conda deactivate
 
+# Uncomment to create the environment
+# conda env create -f environment.yml
+
 # If the following does not work, try 'source activate <env-name>'
 conda activate ngoc_adlm_env_py310
 # conda activate transunet 
-
-# Uncomment to store the environment
-# conda env create -f environment.yml
 
 # Run the program
 #python /vol/miltank/users/doanb/ADLM_SS2025/prompt-to-prompt-Stablediffusion/main.py
