@@ -82,7 +82,6 @@ This will:
 - Plot evaluation results  
 
 <!-- ![Example Evaluation Plot](dice_readme.png) -->
-
 <p align="center">
   <img src="dice_readme.png" alt="Plot 1" width="32%" />
   <img src="asd_readme.png" alt="Plot 2" width="32%" />
@@ -105,7 +104,7 @@ The `job.sbatch` file provides an example of how to run the experiments on an HP
 
 ## 📌 Acknowledgments
 
-- [Prompt-to-Prompt Image Editing with Cross Attention Control](https://arxiv.org/abs/2208.01626)
+- [Prompt-to-Prompt Image Editing with Cross Attention Control](https://github.com/google/prompt-to-prompt)
 - [Prompt2MedImage](https://huggingface.co/nihirc/Prompt2MedImage)
 - [Segment Anything Model 2 (SAM 2)](https://github.com/facebookresearch/sam2)
 - [TotalSegmentator](https://github.com/wasserth/TotalSegmentator)

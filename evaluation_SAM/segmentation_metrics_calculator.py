@@ -331,7 +331,7 @@ def evaluate_lung_masks(all_model_results, use_case: str, model_indices=[0, 1], 
 
                             metrics_rows.append({
                                 'Seed': seed,
-                                'Editing Config': editing_configuration,
+                                'Editing Config': image_case,
                                 'Lung': 'left_lung' if is_left_lung else 'right_lung',
                                 'IoU': iou,
                                 'Dice': dice,
