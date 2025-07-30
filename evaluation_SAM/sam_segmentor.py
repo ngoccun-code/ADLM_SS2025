@@ -22,10 +22,15 @@ def segment(input_image_folder: str, output_file_path: str):
         {"name": "SAM2.1_b", "type": "SAM", "weights": "sam2.1_b.pt"}
     ]
 
-    # Load image paths
+    # Load all image paths recursively
     if not os.path.exists(input_image_folder):
         raise ValueError(f"Image folder '{input_image_folder}' does not exist.")
-    image_paths = [f"{input_image_folder}/{img}" for img in os.listdir(input_image_folder) if img.endswith((".png", ".jpg", ".jpeg"))]
+
+    image_paths = []
+    for root, _, files in os.walk(input_image_folder):
+        for file in files:
+            if file.lower().endswith((".png", ".jpg", ".jpeg")):
+                image_paths.append(os.path.join(root, file))
 
 
     all_model_results = []

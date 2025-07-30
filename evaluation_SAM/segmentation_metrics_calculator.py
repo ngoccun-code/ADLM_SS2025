@@ -138,47 +138,26 @@ def mask_to_contours(mask: np.ndarray) -> list[np.ndarray]:
     return contour_coords
 
 
-def evaluate_lung_masks(all_model_results, use_case, model_indices=[0, 1], iou_threshold=0.5, lung_mask_ratio=0.1, plot_hd=False, plotting=False):
+def evaluate_lung_masks(all_model_results, use_case: str, model_indices=[0, 1], iou_threshold=0.5, lung_mask_ratio=0.1, plot_debug = False, plot_result = False):
     """
-    Evaluate lung masks from segmentation results of SAM segmentor.
+    Pick out and match lung masks for each pair of original and edited images.
     
-
-    Args:
+    Inputs:
         all_model_results (list): List of dictionaries with model names and their segmentation results.
-        use_case (str): Use case to filter results.
-        model_indices (list): Indices of models to use from all_model_results.
+        use_case (str): Use case name to filter results.
+        model_indices (list): Indices of models to use from all_model_results. Currently supports 0 and 1 for SAM_l and SAM2.1_b.
         iou_threshold (float): Threshold for IoU to consider masks as matching.
-        lung_mask_ratio (float): Minimum ratio of mask area to image area to consider a mask
-            valid.
-        plot_hd (bool): If True, plot Hausdorff distance results.
-        plotting (bool): If True, plot masks and contours.
+        lung_mask_ratio (float): Minimum ratio of mask area to image area to consider a mask valid (a lung mask).
+        plot_debug (bool): If True, plot debug information like mask sizes, and HD contours and points.
+        plot_result (bool): If True, plot the matched lung masks side by side.
     Returns:
-        pd.DataFrame: DataFrame with metrics per lung, seed and editing config.
+        pd.DataFrame: DataFrame with metrics per seed, editing config, and lung side. 
+                      Columns: ['Seed', 'Editing Config', 'Lung', 'IoU', 'Dice', 'ASD', 'HD']
     """
 
-    original_recognition_word = "original"
-
-    # A structure matching the original to edited image results
-    """seed_original_edited_results_map:
-    {
-        <seed>: {
-            "original_result": {
-                "img_name": <"....png">,
-                "masks.data": torch.Tensor: ultralytics.engine.results.Results.masks.data
-            },
-            "edited_results": [
-                {
-                  "img_name": <"....png">,
-                  "masks.data": torch.Tensor: ultralytics.engine.results.Results.masks.data
-                },
-                ...
-            ]
-        },
-        ...
-    }
-    """
-    # Temporary structure: seed -> img_name -> list of masks.data tensors
+    # Temporary structure: seed -> img_name -> list of masks.data tensors. To collect segmentation results from all models 
     temp_map = defaultdict(lambda: defaultdict(list))
+
     for model_results in [all_model_results[i] for i in model_indices]:
         #print(model_results["model_name"]) # SAM_l, or SAM2.1_b
         model_results = model_results["results"]
@@ -186,81 +165,101 @@ def evaluate_lung_masks(all_model_results, use_case, model_indices=[0, 1], iou_t
         #print(f"length of model_results: {len(model_results)}") # amount of images
 
         for result in model_results:
-            result = result[0]  # ultralytics.engine.results.Results
-            img_name = result.path.split('/')[-1]
+            result = result[0]  # result is of type ultralytics.engine.results.Results
+            img_path = result.path
+            #print(f"Processing img_path: {img_path}")
 
-            seed = int(img_name.split('_')[0])
-            temp_map[seed][img_name].append(result.masks.data)
+            # extract seed: integer before _ in image name 
+            seed = int(img_path.split('/')[-1].split('_')[0])
 
-    # Final structured map
-    seed_original_edited_results_map = {}
-    for seed, img_dict in temp_map.items():
-        seed_original_edited_results_map[seed] = {
-            "original_result": None,
-            "edited_results": []
-        }
+            if "/original/" in img_path:
+                image_case = "original"
+            elif "/edited_with_Cross_Attn_Editing/" in img_path:
+                # extract editing_configuration: 
+                if use_case.startswith("reweight"):
+                    editing_configuration = img_path.split('/')[-1].split(f"{seed}_")[1].split("_")[0]
+                else:
+                    editing_configuration = "_".join(img_path.split('/')[-1].split("_")[1:3])
+                image_case = editing_configuration
+            elif "/edited_without_Cross_Attn_Editing/" in img_path:
+                image_case = "edited_baseline"
+            
+            temp_map[seed][image_case].append(result.masks.data)
 
-        for img_name, masks_list in img_dict.items():
-            combined_masks = torch.cat(masks_list, dim=0)
-            record = {
-                "img_name": img_name,
-                "masks.data": combined_masks
-            }
+    # Merge each list of masks.data tensors into one 
+    seed_results_map = defaultdict(dict)
 
-            if (original_recognition_word in img_name) and (use_case in img_name):
-                seed_original_edited_results_map[seed]["original_result"] = record
-            else:
-                seed_original_edited_results_map[seed]["edited_results"].append(record)
+    for seed, image_cases in temp_map.items():
+        for image_case, masks_list in image_cases.items():
+            seed_results_map[seed][image_case] = torch.cat(masks_list, dim=0) 
 
-
+    """seed_results_map:
+    {
+        <seed_1>: {
+            'original': torch.Tensor: ultralytics.engine.results.Results.masks.data,
+            'edited_baseline': torch.Tensor: ultralytics.engine.results.Results.masks.data,
+            <editing_configuration_1>: torch.Tensor: ultralytics.engine.results.Results.masks.data,
+            <editing_configuration_2>: torch.Tensor: ultralytics.engine.results.Results.masks.data,
+            ...
+        },
+        <seed_2>: {...},
+        ...
+    }
+    """
 
     metrics_rows = []
 
-    for seed, result_pair in seed_original_edited_results_map.items():
+    for seed, results_map in seed_results_map.items():
+        #if seed not in [3921]: # DEBUG ONLY
+        #    continue
+        #print(f"Seed: {seed}")
 
-        # Access original_result
-        original_img_name = result_pair["original_result"]["img_name"]
-        original_mask_data = result_pair["original_result"]["masks.data"]
-        print(f"\nOriginal image: {original_img_name}")
+        # Access masks of original image
+        original_mask_data = results_map["original"] #<class 'torch.Tensor'>
+        print(f"Seed {seed}: processing original image")
 
-        # For each detected mask, keep only largest connected component
+        # original image masks: For each detected mask, keep only largest connected component
         for mask_idx_1 in range(len(original_mask_data)):
             mask_np_1 = original_mask_data[mask_idx_1].cpu().numpy()
             mask_np_1 = keep_largest_connected_component(mask_np_1)
             original_mask_data[mask_idx_1] = torch.from_numpy(mask_np_1)
 
-        # Do 'Non-Maximum Suppression' for original mask
+        # original image masks: Do 'Non-Maximum Suppression'
         original_mask_data = mask_nms(original_mask_data, plotting=False, iou_threshold=iou_threshold)
         #print(f"Original image has {len(original_mask_data)} masks detected")
 
-        # Access edited_results
-        for edited in result_pair["edited_results"]:
-            edited_img_name = edited["img_name"]
-            edited_mask_data = edited["masks.data"]
-            print(f"--- Edited image: {edited_img_name}")
+        # Acess masks of edited images
+        for image_case, edited_mask_data in results_map.items():
+            if image_case == "original":
+                continue
+            print(f"Seed {seed}: processing {image_case} image")
 
-            # For each detected mask, keep only largest connected component
+            # edited image masks: For each detected mask, keep only largest connected component
             for mask_idx_2 in range(len(edited_mask_data)):
                 mask_np_2 = edited_mask_data[mask_idx_2].cpu().numpy()
                 mask_np_2 = keep_largest_connected_component(mask_np_2)
                 edited_mask_data[mask_idx_2] = torch.from_numpy(mask_np_2)
-            # Do 'Non-Maximum Suppression' for edited mask
+
+            # edited image masks: Do 'Non-Maximum Suppression'
             edited_mask_data = mask_nms(edited_mask_data, plotting=False, iou_threshold=iou_threshold)
             #print(f"Edited image has {len(edited_mask_data)} masks detected")
 
-            # extract editing_configuration
-            if (use_case not in edited_img_name) and (original_recognition_word in edited_img_name):
-                editing_configuration = "No CrossAttn Control"
-            else: # everything between "<seed>_" and "<use_case>" of edited_img_name
-                editing_configuration = edited_img_name.split(f"{seed}_")[1].split(use_case)[0]
-            #print(f"Editing configuration: {editing_configuration}")
-
+            
             # calculate metrics for each pair of mask detected from original and edited
             for mask_idx_1 in range(len(original_mask_data)):
                 mask_np_1 = original_mask_data[mask_idx_1].cpu().numpy()
 
                 # Keep only big enough mask: > than lung_mask_ratio * image area (Cause we compare only lung lobes which are big in image)
-                #print(f"Mask {mask_idx_1} is {round(mask_np_1.sum() / (mask_np_1.shape[0] * mask_np_1.shape[1]),3)} of whole image")
+                if plot_debug:
+                    # plot mask_np_1 
+                    """ Uncomment to plot in an interactive jupyter notebook
+                    print(f"Mask {mask_idx_1} is {round(mask_np_1.sum() / (mask_np_1.shape[0] * mask_np_1.shape[1]),3)} of whole image")
+                    plt.figure(figsize=(1, 1))  # width, height in inches
+                    plt.imshow(mask_np_1, cmap="gray")
+                    plt.axis("off")
+                    plt.show()
+                    """
+
                 if mask_np_1.sum() <= lung_mask_ratio * mask_np_1.shape[0] * mask_np_1.shape[1]:
                     continue
 
@@ -293,7 +292,7 @@ def evaluate_lung_masks(all_model_results, use_case, model_indices=[0, 1], iou_t
                             else:
                                 print(Fore.GREEN + 'RIGHT LUNG' + Style.RESET_ALL)
 
-                            if plotting:
+                            if plot_result:
                                 # plot the two mask side by side
                                 """ Uncomment to plot in an interactive jupyter notebook
                                 plt.figure(figsize=(2, 2))
@@ -314,7 +313,7 @@ def evaluate_lung_masks(all_model_results, use_case, model_indices=[0, 1], iou_t
                             asd = round(average_surface_distance(contour1, contour2),2)
                             hd = hausdorff_distance(mask_np_1, mask_np_2)
 
-                            if plot_hd:
+                            if plot_debug:
                                 # Plot contours and highlight the furthest points causing hd value
                                 """ Uncomment to plot in an interactive jupyter notebook
                                 (pointA, pointB), hd = find_hd_points(contour1, contour2) 

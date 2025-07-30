@@ -30,6 +30,6 @@ conda activate ngoc_adlm_env_py310
 
 # Run the program
 #python /vol/miltank/users/doanb/ADLM_SS2025/prompt-to-prompt-Stablediffusion/main.py
-python /vol/miltank/users/doanb/ADLM_SS2025/evaluation/main.py 
+python /vol/miltank/users/doanb/ADLM_SS2025/evaluation_SAM/main.py
 
 #python /vol/miltank/users/doanb/ADLM_SS2025/prompt-to-prompt-Stablediffusion/main_inversion_tryout.py 

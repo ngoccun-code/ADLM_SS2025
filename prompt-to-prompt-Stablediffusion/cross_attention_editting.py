@@ -10,7 +10,9 @@ import textwrap
 import ptp_utils
 import seq_aligner
 
-# emphasize selected words epresenting thing that should be alter
+######################## Source code from https://github.com/google/prompt-to-prompt, modified for use within this project. ##########################################
+
+# emphasize selected words representing thing that should be alter
 class LocalBlend:
     def __call__(self, x_t, attention_store):
         """
@@ -39,6 +41,9 @@ class LocalBlend:
         """
         Input:  prompts: list of input text prompts
                 words: list of target words (or word groups) to focus on
+                MAX_NUM_WORDS: maximum number of words in the longest prompt
+                tokenizer: tokenizer used to encode the prompts
+                device: device to run the computations on (e.g., 'cuda' or 'cpu')
         """
         # alpha_layers: a binary mask tensor indicating which tokens (words) in each prompt should be emphasized
         self.MAX_NUM_WORDS = MAX_NUM_WORDS
@@ -263,61 +268,6 @@ def aggregate_attention(attention_store: AttentionStore, res: int, from_where: L
     out = out.sum(0) / out.shape[0]
     return out.cpu()
 
-# Displays the spatial attention map per token in a prompt (which parts of the image are associated with each single word).
-def show_cross_attention(tokenizer, prompts, displayNumber, attention_store: AttentionStore, res: int, from_where: List[str], select: int = 0):
-    """
-    Input:  tokenizer: Tokenizer used to encode prompts
-            prompts: List of text prompts
-            displayNumber: Number to identify the output image
-            attention_store: Instance of AttentionStore holding averaged (cross and self) attention maps of all prompts
-            res: Resolution of attention (e.g., 16 for 16×16 spatial attention).
-            from_where: Layers to include (["up", "down", "mid"]).
-            select: Index of the prompt being visualized
-    """
-    tokens = tokenizer.encode(prompts[select])
-    decoder = tokenizer.decode
-    attention_maps = aggregate_attention(attention_store, res, from_where, True, select, prompts)
-    # attention_maps has shape (H, W, num_tokens) — a stack of 2D attention heatmaps.
-    images = []
-
-    for i in range(len(tokens)):
-        image = attention_maps[:, :, i] # Extract attention map for the i-th token. 
-        image = 255 * image / image.max() # Normalize to 0-255 range
-        image = image.unsqueeze(-1).expand(*image.shape, 3) # Convert the single-channel (grayscale) image to a 3-channel RGB image - required for saving as RGB
-        image = image.numpy().astype(np.uint8)
-        image = np.array(Image.fromarray(image).resize((256, 256))) # Resize to 256x256
-        image = ptp_utils.text_under_image(image, decoder(int(tokens[i]))) # Add the token text below the image as a label
-        images.append(image)
-
-    #ptp_utils.view_images(np.stack(images, axis=0))
-    save_attention_images_to_file(np.stack(images, axis=0), displayNumber=displayNumber, file_name_postfix="cross_attention")
-
-def show_cross_attention_per_word(tokenizer, prompts, displayNumber, attention_store: AttentionStore, res: int, from_where: List[str], select: int = 0):
-    """
-    Input:  tokenizer: Tokenizer used to encode prompts
-            prompts: List of text prompts
-            displayNumber: Number to identify the output image
-            attention_store: Instance of AttentionStore holding averaged (cross and self) attention maps of all prompts
-            res: Resolution of attention (e.g., 16 for 16×16 spatial attention).
-            from_where: Layers to include (["up", "down", "mid"]).
-            select: Index of the prompt being visualized
-    """
-    attention_maps = aggregate_attention(attention_store, res, from_where, True, select, prompts)
-    # attention_maps has shape (H, W, num_tokens) — a stack of 2D attention heatmaps.
-    images = []
-    
-    for word in prompts[select].split():
-        inds = ptp_utils.get_word_inds(prompts[select], word, tokenizer)
-        image = attention_maps[:, :, inds].sum(axis=-1)  # Sum the attention maps for all tokens of this word
-        image = 255 * image / image.max() # Normalize to 0-255 range
-        image = image.unsqueeze(-1).expand(*image.shape, 3)  # Convert to RGB
-        image = image.numpy().astype(np.uint8)
-        image = np.array(Image.fromarray(image).resize((256, 256)))  # Resize to 256x256
-        image = ptp_utils.text_under_image(image, word)  # Add the word text below the image as a label
-        images.append(image)
-
-    save_attention_images_to_file(np.stack(images, axis=0), displayNumber=displayNumber, file_name_postfix="cross_attention")
-
 # Performs SVD on self-attention maps to reveal dominant components of spatial relationships -> useful for advanced inspection
 def show_self_attention_comp(prompts, displayNumber, attention_store: AttentionStore, res: int, from_where: List[str],
                         max_com=10, select: int = 0):
@@ -337,6 +287,21 @@ def show_self_attention_comp(prompts, displayNumber, attention_store: AttentionS
 
 # Runs Stable Diffusion with or without Prompt-to-Prompt control, displays output, and returns image + latent.
 def run_and_display(prompts, displayNumber, controller, ldm_stable, NUM_DIFFUSION_STEPS, GUIDANCE_SCALE, latent=None, run_baseline=False, generator=None, save_images_side_by_side=False):
+    """
+    Runs Stable Diffusion with (and without) Prompt-to-Prompt control 
+
+    Input:  prompts (List[str]): List of text prompts to generate images from. The first prompt is used as the original prompt, and the rest are edited prompts.
+            displayNumber (int): Number to identify the output image.
+            controller (AttentionControlEdit): Instance of AttentionControlEdit to manipulate attention during diffusion.
+            ldm_stable (StableDiffusion): Instance of Stable Diffusion model to generate images.
+            NUM_DIFFUSION_STEPS (int): Number of diffusion steps to run.
+            GUIDANCE_SCALE (float): Guidance scale for Stable Diffusion.
+            latent (Optional[torch.Tensor]): Initial latent representation to start the diffusion from. If None, a new latent is generated.
+            run_baseline (bool): If True, additionally runs Stable Diffusion without Prompt-to-Prompt control.
+            generator (Optional[torch.Generator]): Optional random generator for reproducibility.
+            save_images_side_by_side (bool): If True, save one output image with all generated images of the prompts side by side.
+    Returns: images (List[np.ndarray]): Generated images.
+    """
     if run_baseline:
         print("w.o. prompt-to-prompt")
         images, latent = run_and_display(prompts, displayNumber, EmptyControl(), ldm_stable, NUM_DIFFUSION_STEPS, GUIDANCE_SCALE, latent=latent, run_baseline=False, generator=generator)
@@ -344,9 +309,37 @@ def run_and_display(prompts, displayNumber, controller, ldm_stable, NUM_DIFFUSIO
     images, x_t = ptp_utils.text2image_ldm_stable(ldm_stable, prompts, controller, latent=latent, num_inference_steps=NUM_DIFFUSION_STEPS, guidance_scale=GUIDANCE_SCALE, generator=generator)
     #ptp_utils.view_images(images)
     if save_images_side_by_side:
-        save_images_to_file(prompts, images, displayNumber=displayNumber, file_name_postfix="run")
+        save_images_side_by_side_to_file(prompts, images, displayNumber=displayNumber, file_name_postfix="run")
     return images, x_t
 
+# Displays the cross attention map per word (can be a set of tokens) in a prompt (which parts of the image are associated with each single word).
+def show_cross_attention_per_word(tokenizer, prompts, displayNumber, attention_store: AttentionStore, res: int, from_where: List[str], select: int = 0):
+    """
+    Input:  tokenizer: Tokenizer used to encode the prompts.
+            prompts (List[str]): List of text prompts.
+            displayNumber (int): Number to identify the output image.
+            attention_store (AttentionStore): Instance of AttentionStore holding averaged cross-attention maps.
+            res (int): Resolution of attention (e.g., 16 for 16×16 spatial attention).
+            from_where (List[str]): Layers to include 
+            select (int): Index of the prompt being visualized.
+    """
+    attention_maps = aggregate_attention(attention_store, res, from_where, True, select, prompts)
+    # attention_maps has shape (H, W, num_tokens) — a stack of 2D attention heatmaps.
+    images = []
+    
+    for word in prompts[select].split():
+        inds = ptp_utils.get_word_inds(prompts[select], word, tokenizer)
+        image = attention_maps[:, :, inds].sum(axis=-1)  # Sum the attention maps for all tokens of this word
+        image = 255 * image / image.max() # Normalize to 0-255 range
+        image = image.unsqueeze(-1).expand(*image.shape, 3)  # Convert to RGB
+        image = image.numpy().astype(np.uint8)
+        image = np.array(Image.fromarray(image).resize((256, 256)))  # Resize to 256x256
+        image = ptp_utils.text_under_image(image, word)  # Add the word text below the image as a label
+        images.append(image)
+
+    save_attention_images_to_file(np.stack(images, axis=0), displayNumber=displayNumber, file_name_postfix="cross_attention")
+
+# Helper function to save attention images to a file
 def save_attention_images_to_file(images, displayNumber, file_name_postfix, num_rows=1, offset_ratio=0.02, output_dir="generated_images"):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
@@ -385,8 +378,8 @@ def save_attention_images_to_file(images, displayNumber, file_name_postfix, num_
 
     print(f"[Saved]: {file_path}")
 
-def save_images_to_file(prompts, images, displayNumber, file_name_postfix, num_rows=1, offset_ratio=0.02, output_dir="generated_images"):
-    
+# Helper function to save images side by side with prompts below each image
+def save_images_side_by_side_to_file(prompts, images, displayNumber, file_name_postfix, num_rows=1, offset_ratio=0.02, output_dir="generated_images"):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
@@ -450,8 +443,8 @@ def save_images_to_file(prompts, images, displayNumber, file_name_postfix, num_r
     image_.save(file_path)
     print(f"[Saved]: {file_path}")
 
-
-def save_images_separately(prompts, images, use_case, output_dir="generated_images", image_name=None):
+# Helper function to save each image separately for later feeding into segmentation models
+def save_images_separately(prompts, images, use_case: str, output_dir="generated_images", image_name=None):
     save_dir = os.path.join(output_dir, use_case)
     os.makedirs(save_dir, exist_ok=True)
 

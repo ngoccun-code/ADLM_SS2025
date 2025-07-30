@@ -7,7 +7,7 @@ def plot_metrics(plot_df, metric: str, config_order: list, title: str, x_label: 
     """
     Create a plot for the specified metric as seen in the report.
 
-    Args:
+    Inputs:
         plot_df (pd.DataFrame): pandas DataFrame with columns ['Seed', 'Editing Config', 'IoU', 'Dice', 'ASD', 'HD']. 
         metric (str): the metric to plot (e.g., 'Dice', 'ASD', 'HD').
         config_order (list): the order of editing configurations for the x-axis.
