@@ -81,7 +81,13 @@ This will:
 - Compute Dice, ASD, and HD metrics
 - Plot evaluation results  
 
-![Example Evaluation Plot](readme_plot_example.png)
+<!-- ![Example Evaluation Plot](dice_readme.png) -->
+
+<p align="center">
+  <img src="dice_readme.png" alt="Plot 1" width="32%" />
+  <img src="asd_readme.png" alt="Plot 2" width="32%" />
+  <img src="hd_readme.png" alt="Plot 3" width="32%" />
+</p>
 
 ---
 
